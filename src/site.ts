@@ -31,5 +31,4 @@ export class Site {
     static WAIT_HOURS: number = parseInt(process.env['WAIT_HOURS'] || '0') || 12;
 
     static LLM_MIN_DRAW_SCORE: number = parseFloat(process.env['LLM_MIN_DRAW_SCORE'] || '0') || 0.3;
-    static LLM_ADJ_FACTOR: number = parseFloat(process.env['LLM_ADJ_FACTOR'] || '0') || 0.08;
 }

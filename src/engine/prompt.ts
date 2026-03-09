@@ -1,3 +1,4 @@
+import { Odds } from './../model/sporty';
 import { Site } from './../site';
 import { Extracted, Verdict } from './../model/prompt';
 import { GroqEngine } from "./groq";
@@ -6,27 +7,22 @@ import { impliedProbability } from './../lib/sportylib';
 export class PromptEngine {
     private static verdictSystemPrompt = () => {
         return [
-            `ACT AS: Senior Football Quant.`,
-            `GOAL: Adjust draw_score [0..1] using external signals.`,
-            `PRIORITY:`,
-            `- Prioritize EXTERNAL_DATA (Sofascore stats, H2H, season totals) as the primary source of truth.`,
-            `- De-emphasize the internal BASE_SCORE (deterministic draw score). It is derived from internal markers that can be short-lived or incomplete.`,
-            `- Use external signals to override or validate the internal model if there's a discrepancy.`,
-            `LOGIC:`,
-            `1. Defensive Parity: Low-scoring H2H + matching low season goals = UP (max +${Site.LLM_ADJ_FACTOR}).`,
-            `2. Volatility: High Goals/Match or volatile results = DOWN (max -${Site.LLM_ADJ_FACTOR}).`,
-            `3. Market Clash: If Bookmaker Prob >> Model Draw & external data supports high draw = UP.`,
-            `4. Model Confirmation: If external data aligns with model = 0 adjustment.`,
-            `EXTREME OVERRIDES:`,
-            `- If certainty of NO DRAW (>90%): adjustment_factor = -1.0 (forces 0).`,
-            `- If certainty of DRAW (>90%): adjustment_factor = 2.0 (forces 1).`,
-            `JSON OUTPUT ONLY: {"final_score": number, "is_likely_draw": boolean, "adjustment_factor": number, "confidence": number, "reason": "string"}`,
-            `LIKELY DRAW: Set "is_likely_draw" to true ONLY if you are highly confident the match will end in a draw based on all provided signals.`,
+            `ACT AS: Lead Football Quant and Tactical Analyst.`,
+            `GOAL: Execute a deep-dive analysis of a football fixture to identify high-probability DRAW scenarios.`,
+            `CORE ANALYSIS PILLARS:`,
+            `1. Parity Index: Cross-reference 'goalDifferencePerMatch' and 'chanceBalance'. Strong convergence in these indicates tactical stalemates.`,
+            `2. Defensive Anchors: Evaluate 'avgRating' of featured defenders/goalkeepers vs. 'goalsAgainstPerMatch'. High ratings with low GAPM suggest a high 'clean sheet' or '1-goal limit' probability.`,
+            `3. Scoring Efficiency: Contrast 'bigChances' created vs. 'goalsScored'. If chances are high but goals are low, it suggests poor finishing efficiency—a key driver for low-scoring draws.`,
+            `4. Reversion to Mean: Analyze seasonal 'drawRate' against recent 'form' (W/D/L). Identify if a team is statistically "due" for a draw based on variance.`,
+            `5. Tactical Matchup: Evaluate Manager H2H history. Some managerial styles neutralize each other, leading to conservative play.`,
+            `6. Market Efficiency: Compare Implied Draw Probability (from odds) against your analytical verdict. Note if the market is under-pricing a high-probability stalemate.`,
+            `JSON OUTPUT ONLY: {"isLikelyDraw": boolean, "reason": "string"}`,
+            `isLikelyDraw: Set to true ONLY if multiple signals across statistics, form, and market convergence confirm a high-confidence draw.`,
             `REASONING RULES:`,
-            `- Use clear, professional, natural English.`,
-            `- DO NOT use cryptic shorthand, arrows (→), or math notation in the "reason" field.`,
-            `- Explain the "Why" behind your adjustment so a human can understand the logic.`,
-            `final_score calculation: deterministic_score * (1 + adjustment_factor). Clip result [0,1].`,
+            `- MUST follow a 'Logic-First' approach.`,
+            `- Start with the most compelling statistical alignment found across the pillars.`,
+            `- Use professional terminology: (e.g., 'Positive Goal Difference Parity', 'Low-Volatility Scoring Profile', 'Market Undervaluation').`,
+            `- DO NOT use shorthand or arrows. Explain the "Why" clearly for a human analyst.`,
         ].join("\n");
     }
 
@@ -35,22 +31,26 @@ export class PromptEngine {
         away: string,
         league: string,
         startTime: number,
-        opts: {
-            drawScore: number,
-            drawOdds: number,
-            deterministicVerbose: string,
-            extracted: Extracted,
-        }
+        odds: Odds,
+        extracted: Extracted
     ) => {
         const system = PromptEngine.verdictSystemPrompt();
-        const bookieProb = impliedProbability(opts.drawOdds);
+        const bookieProb = impliedProbability(odds.draw);
 
         const user = [
-            `FIXTURE: ${home} v ${away} | ${league} | ${new Date(startTime).toISOString()}`,
-            `BASE_SCORE: ${opts.drawScore.toFixed(4)} | BOOKIE_PROB: ${bookieProb.toFixed(4)}`,
-            `INTERNAL_MODEL: ${opts.deterministicVerbose}`,
-            `EXTERNAL_DATA: ${JSON.stringify(opts.extracted)}`,
-            `Adjust base score based on signals. Return JSON.`,
+            `### FIXTURE DATA ###`,
+            `Teams: ${home} vs ${away}`,
+            `League: ${league}`,
+            `Kick-off: ${new Date(startTime).toISOString()}`,
+            ``,
+            `### MARKET SIGNALS ###`,
+            `Odds: Home(${odds.homeWin}), Draw(${odds.draw}), Away(${odds.awayWin})`,
+            `Market Implied Draw Probability: ${bookieProb.toFixed(4)}`,
+            ``,
+            `### EXTRACTED STATISTICS ###`,
+            `${JSON.stringify(extracted, null, 2)}`,
+            ``,
+            `Analyze the above data points against your CORE ANALYSIS PILLARS and determine if a draw is the most probable tactical outcome.`,
         ].join("\n");
 
         return { system, user };
@@ -62,13 +62,11 @@ export class PromptEngine {
         league: string,
         startTime: number,
         opts: {
-            drawScore: number,
-            drawOdds: number,
-            deterministicVerbose: string,
+            odds: Odds,
             extracted: Extracted,
         }
     ): Promise<Verdict | null> => {
-        const { system, user } = PromptEngine.verdictPrompt(home, away, league, startTime, opts);
+        const { system, user } = PromptEngine.verdictPrompt(home, away, league, startTime, opts.odds, opts.extracted);
         const res = await GroqEngine.direct({
             messages: [
                 {

@@ -272,19 +272,6 @@ export type Odds = {
     homeWin?: number
     draw?: number
     awayWin?: number
-    over05?: number
-    over15?: number
-    over25?: number
-    over35?: number
-    under05?: number
-    under15?: number
-    under25?: number
-    under35?: number
-    bttsYes?: number
-    bttsNo?: number
-    dc1X?: number
-    dcX2?: number
-    dc12?: number
 }
 
 export type Fixture = {
@@ -300,9 +287,7 @@ export type Fixture = {
     drawScore?: number
     resultCheckedCount?: number
     llmAttempted?: boolean;
-    llmVerdict?: string;
     hasVerdict?: boolean;
-    adjustmentFactor?: number;
     isTurnedOff?: boolean;
     isLikelyDraw?: boolean;
 }

@@ -544,7 +544,7 @@ export class SofascoreEngine {
     private static run = async () => {
         const start = Date.now();
         const conclude = () => {
-            Log.flow([SLUG, `Cleanup`, `Concluded.`], WEIGHT);
+            Log.flow([SLUG, `Iteration`, `Concluded.`], WEIGHT);
             const interval = 1000 * 60 * 60 * 24;
             const duration = Date.now() - start;
             if (duration >= interval) {
@@ -557,7 +557,7 @@ export class SofascoreEngine {
                 }, timeToGetThere);
             }
         }
-        Log.flow([SLUG, `Cleanup`, `Initialized.`], WEIGHT);
+        Log.flow([SLUG, `Iteration`, `Initialized.`], WEIGHT);
 
         // Clean up old dates
         const today = SofascoreEngine.getToday();

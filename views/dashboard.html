@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Draw Engine Dashboard</title>
+    <title>Parity Dashboard</title>
 
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
@@ -43,6 +43,13 @@
 
         .table-responsive {
             max-height: 75vh;
+            overflow-x: auto;
+            overflow-y: auto;
+        }
+
+        .table-responsive table th,
+        .table-responsive table td {
+            white-space: nowrap;
         }
 
         textarea {
@@ -113,20 +120,17 @@
     <div class="container-fluid mt-4">
 
         <div class="d-flex justify-content-between align-items-center mb-3">
-            <h4 class="mb-0">Draw Engine</h4>
+            <h4 class="mb-0">Parity</h4>
             <div>
                 <button class="btn btn-sm btn-outline-secondary" onclick="refreshData()">Refresh</button>
-                <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal"
-                    data-bs-target="#importModal">Import JSON</button>
                 <button class="btn btn-sm btn-outline-success" onclick="downloadAll()">Export JSON</button>
                 <button class="btn btn-sm btn-outline-success" onclick="resetLoop()">Reloop</button>
                 <button class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#bookModal">Book
                     Draw</button>
-                <button class="btn btn-sm btn-info" data-bs-toggle="modal" data-bs-target="#bookOEModal">Book O/E</button>
-                <a class="btn btn-sm btn-outline-success" href="/data/report/6">Report (6hrs)</a>
+                <!-- <a class="btn btn-sm btn-outline-success" href="/data/report/6">Report (6hrs)</a>
                 <a class="btn btn-sm btn-outline-success" href="/data/report/12">Report (12hrs)</a>
                 <a class="btn btn-sm btn-outline-success" href="/data/report/24">Report (24hrs)</a>
-                <a class="btn btn-sm btn-outline-success" href="/data/report/0">Report (All)</a>
+                <a class="btn btn-sm btn-outline-success" href="/data/report/0">Report (All)</a> -->
             </div>
         </div>
 
@@ -191,29 +195,6 @@
         </div>
     </div>
 
-    <!-- IMPORT MODAL -->
-    <div class="modal fade" id="importModal">
-        <div class="modal-dialog modal-lg modal-dialog-scrollable">
-            <div class="modal-content">
-                <form id="importForm">
-                    <div class="modal-header">
-                        <h5 class="modal-title">Import Historical JSON</h5>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                    </div>
-                    <div class="modal-body">
-                        <textarea id="jsonInput" class="form-control" rows="12"
-                            placeholder="Paste JSON here..."></textarea>
-                        <div id="importFeedback" class="alert mt-3 d-none"></div>
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                        <button type="submit" class="btn btn-primary">Import</button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    </div>
-
     <!-- BOOK MODAL -->
     <div class="modal fade" id="bookModal">
         <div class="modal-dialog modal-dialog-scrollable">
@@ -251,41 +232,6 @@
         </div>
     </div>
 
-    <!-- BOOK O/E MODAL -->
-    <div class="modal fade" id="bookOEModal">
-        <div class="modal-dialog modal-dialog-scrollable">
-            <div class="modal-content">
-                <form id="bookOEForm">
-                    <div class="modal-header">
-                        <h5 class="modal-title">Book Odd/Even</h5>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                    </div>
-                    <div class="modal-body">
-                        <div class="mb-3">
-                            <label class="form-label">Number of Games (G)</label>
-                            <input type="number" id="bookOEG" class="form-control" value="5" min="1">
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">Number of Tickets (T)</label>
-                            <input type="number" id="bookOET" class="form-control" value="1" min="1">
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">Selections per Ticket (N) - Optional</label>
-                            <input type="number" id="bookOEN" class="form-control" placeholder="Default: G" min="1">
-                        </div>
-                        <div id="bookOEFeedback" class="alert d-none"></div>
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                        <button type="submit" class="btn btn-primary">
-                            <span class="spinner-border spinner-border-sm d-none" role="status" aria-hidden="true"></span>
-                            <span class="btn-text">Book</span>
-                        </button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    </div>
 
     <!-- SHOW MORE MODAL -->
     <div class="modal fade" id="verdictModal">
@@ -305,7 +251,7 @@
                         <div id="verdictReason" class="alert alert-info small"></div>
                         <div class="row mb-3">
                             <div class="col-6">
-                                <strong>Confidence:</strong> <span id="verdictConfidence"></span>%
+                                <strong>Draw Score:</strong> <span id="verdictScore"></span>%
                             </div>
                         </div>
                         <h6>Extracted Data</h6>
@@ -347,17 +293,9 @@
 
                     let robotIcon = "";
                     if (f.hasVerdict) {
-                        robotIcon = `<i class="bi bi-robot robot-icon verdict-full" title="Verdict Received"></i>`;
+                        robotIcon = `<i class="bi bi-robot robot-icon verdict-full" title="Has extended data"></i>`;
                     } else if (f.llmAttempted) {
                         robotIcon = `<i class="bi bi-robot robot-icon verdict-attempted" title="LLM Attempted, No Verdict"></i>`;
-                    }
-
-                    let adjIcon = "";
-                    const af = f.adjustmentFactor || 0;
-                    if (af > 0.0001) {
-                        adjIcon = `<i class="bi bi-caret-up-fill adjustment-icon adjustment-up" title="Adjusted Up (+${(af * 100).toFixed(1)}%)"></i>`;
-                    } else if (af < -0.0001) {
-                        adjIcon = `<i class="bi bi-caret-down-fill adjustment-icon adjustment-down" title="Adjusted Down (${(af * 100).toFixed(1)}%)"></i>`;
                     }
 
                     let likelyDrawIcon = "";
@@ -365,7 +303,7 @@
                         likelyDrawIcon = `<span title="High Confidence Draw" style="cursor:help; margin-left: 5px;">🔥</span>`;
                     }
 
-                    const showMoreBtn = f.llmAttempted 
+                    const showMoreBtn = (f.llmAttempted || f.hasVerdict)
                         ? `<button class="btn btn-xs btn-outline-primary py-0" style="font-size: 10px;" onclick='showVerdict("${f.eventId}")'>More</button>` 
                         : "";
 
@@ -379,7 +317,7 @@
             <tr class="${cls}">
                 <td class="text-center">${activeSwitch}</td>
                 <td>${f.league}</td>
-                <td>${robotIcon} ${f.home} vs ${f.away} ${adjIcon}${likelyDrawIcon}</td>
+                <td>${robotIcon} ${f.home} vs ${f.away} ${likelyDrawIcon}</td>
                 <td>${formatTime(f.startTime)}</td>
                 <td>${(f.drawScore * 100).toFixed(1)}%</td>
                 <td>${formatOdds(f.odds)}</td>
@@ -417,7 +355,7 @@
                 $("#verdictContent").removeClass("d-none");
 
                 $("#verdictReason").text(data.verdict || "No reasoning available.");
-                $("#verdictConfidence").text((data.confidence * 100).toFixed(1));
+                $("#verdictScore").text((data.drawScore * 100).toFixed(1));
                 
                 const container = document.getElementById('extractedData');
                 container.innerHTML = "";
@@ -640,17 +578,9 @@
 
                     let robotIcon = "";
                     if (f.hasVerdict) {
-                        robotIcon = `<i class="bi bi-robot robot-icon verdict-full" title="Verdict Received"></i>`;
+                        robotIcon = `<i class="bi bi-robot robot-icon verdict-full" title="Has extended data"></i>`;
                     } else if (f.llmAttempted) {
                         robotIcon = `<i class="bi bi-robot robot-icon verdict-attempted" title="LLM Attempted, No Verdict"></i>`;
-                    }
-
-                    let adjIcon = "";
-                    const af = f.adjustmentFactor || 0;
-                    if (af > 0.0001) {
-                        adjIcon = `<i class="bi bi-caret-up-fill adjustment-icon adjustment-up" title="Adjusted Up (+${(af * 100).toFixed(1)}%)"></i>`;
-                    } else if (af < -0.0001) {
-                        adjIcon = `<i class="bi bi-caret-down-fill adjustment-icon adjustment-down" title="Adjusted Down (${(af * 100).toFixed(1)}%)"></i>`;
                     }
 
                     let likelyDrawIcon = "";
@@ -658,7 +588,7 @@
                         likelyDrawIcon = `<span title="High Confidence Draw" style="cursor:help; margin-left: 5px;">🔥</span>`;
                     }
 
-                    const showMoreBtn = f.llmAttempted
+                    const showMoreBtn = (f.llmAttempted || f.hasVerdict)
                         ? `<button class="btn btn-xs btn-outline-primary py-0" style="font-size: 10px;" onclick='showVerdict("${f.eventId}")'>More</button>`
                         : "";
 
@@ -676,7 +606,7 @@
             <tr class="${cls}">
                 <td class="text-center">${activeSwitch}</td>
                 <td>${f.league}</td>
-                <td>${robotIcon} ${f.home} vs ${f.away} ${adjIcon}${likelyDrawIcon}</td>
+                <td>${robotIcon} ${f.home} vs ${f.away} ${likelyDrawIcon}</td>
                 <td>${formatTime(f.startTime)}</td>
                 <td>${(f.drawScore * 100).toFixed(1)}%</td>
                 <td>${result}</td>
@@ -709,34 +639,6 @@
             window.location.href = "/data/download";
         }
 
-        $("#importForm").submit(function (e) {
-            e.preventDefault();
-
-            const raw = $("#jsonInput").val().trim();
-            const feedback = $("#importFeedback");
-
-            feedback.removeClass("alert-success alert-danger").addClass("d-none");
-
-            if (!raw) {
-                feedback.addClass("alert-danger").removeClass("d-none").text("Empty JSON.");
-                return;
-            }
-
-            $.ajax({
-                url: "/data/import",
-                method: "POST",
-                contentType: "application/json",
-                data: raw,
-                success: function (res) {
-                    feedback.addClass("alert-success").removeClass("d-none").text(res || "Imported successfully.");
-                    refreshData();
-                },
-                error: function (xhr) {
-                    feedback.addClass("alert-danger").removeClass("d-none").text(xhr.responseText || "Import failed.");
-                }
-            });
-        });
-
         $("#bookForm").submit(function (e) {
             e.preventDefault();
 
@@ -749,29 +651,7 @@
             setLoading(btn, cancelBtn, true);
             feedback.removeClass("alert-success alert-danger").addClass("d-none");
 
-            $.get("/data/ftx", { limit, minDrawIndex: minScore }, function (res) {
-                feedback.addClass("alert-success").removeClass("d-none").text(res || "Booked.");
-            }).fail(function (xhr) {
-                feedback.addClass("alert-danger").removeClass("d-none").text(xhr.responseText || "Booking failed.");
-            }).always(() => {
-                setLoading(btn, cancelBtn, false);
-            });
-        });
-
-        $("#bookOEForm").submit(function (e) {
-            e.preventDefault();
-
-            const g = $("#bookOEG").val();
-            const t = $("#bookOET").val();
-            const n = $("#bookOEN").val();
-            const feedback = $("#bookOEFeedback");
-            const btn = $(this).find('button[type="submit"]');
-            const cancelBtn = $(this).find('button[data-bs-dismiss="modal"]');
-
-            setLoading(btn, cancelBtn, true);
-            feedback.removeClass("alert-success alert-danger").addClass("d-none");
-
-            $.get("/data/book-oe", { g, t, n }, function (res) {
+            $.get("/data/ftx", { limit, minDrawIndex: minScore}, function (res) {
                 feedback.addClass("alert-success").removeClass("d-none").text(res || "Booked.");
             }).fail(function (xhr) {
                 feedback.addClass("alert-danger").removeClass("d-none").text(xhr.responseText || "Booking failed.");

@@ -79,8 +79,6 @@ export interface Extracted {
     };
 }
 export interface Verdict {
-    final_score: number,
-    adjustment_factor: number,
-    confidence: number,
+    isLikelyDraw: boolean,
     reason: string
 }

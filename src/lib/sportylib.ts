@@ -1,5 +1,4 @@
-import { HistoricalFixture, Odds } from "./../model/sporty";
-
+import { Extracted } from './../model/prompt';
 export const toNum = (v: any) => {
     const n = Number(v);
     return Number.isFinite(n) ? n : null;
@@ -32,12 +31,6 @@ export const normalizeMarketOdds = (oddsMap: Record<any, any>) => {
 
 export const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
 
-export const clamp = (n: number, min = 0, max = 1): number =>
-    Math.min(Math.max(n, min), max);
-
-export const safe = (n: unknown, fallback = 0): number =>
-    typeof n === "number" && Number.isFinite(n) ? n : fallback;
-
 export function safeDivide(a: number, b: number): number {
     if (!b || b === 0) return 0
     return a / b
@@ -52,344 +45,354 @@ export function shrink(observedRate: number, sampleSize: number, prior: number, 
     return (observedRate * sampleSize + prior * strength) / (sampleSize + strength)
 }
 
+type FormResult = "W" | "D" | "L";
 
-// ---------------- LEAGUE METRICS ----------------
-export function computeLeagueMetrics(fixtures: HistoricalFixture[]) {
+export interface EngineWeights {
 
-    const total = fixtures.length
+    groupWeights: {
+        primary: number;
+        secondary: number;
+        tertiary: number;
+    };
 
-    if (total === 0) {
-        return {
-            drawRate: 0,
-            under25Rate: 0,
-            avgGoals: 0,
-            goalClosenessRate: 0,
-            confidence: 0,
-            txt: `fixtures:0`
-        }
-    }
+    primary: {
+        leagueDrawRate: number;
+        homeDrawRate: number;
+        awayDrawRate: number;
+        homeForm: number;
+        awayForm: number;
+    };
 
-    const decayFactor = 0.997
-    let weightSum = 0
-    let weightedDraws = 0
-    let weightedUnder25 = 0
-    let weightedGoals = 0
-    let weightedClose = 0
+    secondary: {
+        goalDifferenceBalance: number;
+        bigChanceBalance: number;
+    };
 
-    for (let i = 0; i < fixtures.length; i++) {
+    tertiary: {
+        h2hDrawRate: number;
+        managerDrawRate: number;
+    };
 
-        const f = fixtures[i]
-        const hg = safe(f.homeGoals)
-        const ag = safe(f.awayGoals)
-        const goals = hg + ag
-        const goalDiff = Math.abs(hg - ag)
+    penalties: {
+        missingData: number;
+        formImbalance: number;
+        strengthImbalance: number;
+    };
 
-        const weight = Math.pow(decayFactor, fixtures.length - 1 - i)
-
-        weightSum += weight
-
-        if (hg === ag) weightedDraws += weight
-        if (goals <= 2) weightedUnder25 += weight
-        if (goalDiff <= 1) weightedClose += weight
-
-        weightedGoals += goals * weight
-    }
-
-    return {
-        drawRate: weightedDraws / weightSum,
-        under25Rate: weightedUnder25 / weightSum,
-        avgGoals: weightedGoals / weightSum,
-        goalClosenessRate: weightedClose / weightSum,
-        confidence: Math.min(total / 50, 1),
-        txt: `fixtures:${total}`
-    }
+    interactionBoost: number;
 }
 
+export const DEFAULT_WEIGHTS: EngineWeights = {
 
-// ---------------- TEAM METRICS ----------------
-export function computeTeamMetrics(
-    fixtures: HistoricalFixture[],
-    team: string,
-    isHome: boolean
+    groupWeights: {
+        primary: 0.6,
+        secondary: 0.25,
+        tertiary: 0.15
+    },
+
+    primary: {
+        leagueDrawRate: 0.15,
+        homeDrawRate: 0.2,
+        awayDrawRate: 0.2,
+        homeForm: 0.225,
+        awayForm: 0.225
+    },
+
+    secondary: {
+        goalDifferenceBalance: 0.6,
+        bigChanceBalance: 0.4
+    },
+
+    tertiary: {
+        h2hDrawRate: 0.65,
+        managerDrawRate: 0.35
+    },
+
+    penalties: {
+        missingData: 0.5,
+        formImbalance: 0.35,
+        strengthImbalance: 0.4
+    },
+
+    interactionBoost: 0.05
+};
+
+// ===============================
+// Helpers
+// ===============================
+
+const clamp = (v: number) => Math.min(1, Math.max(0, v));
+
+const safe = (v?: number | null, fallback = 0) =>
+    v !== undefined && v !== null ? v : fallback;
+
+function drawRatio(form?: FormResult[]) {
+
+    if (!form || form.length === 0) return null;
+
+    const draws = form.filter(x => x === "D").length;
+
+    return draws / form.length;
+}
+
+function formStrength(form?: FormResult[]) {
+
+    if (!form || form.length === 0) return null;
+
+    let points = 0;
+
+    for (const f of form) {
+        if (f === "W") points += 3;
+        if (f === "D") points += 1;
+    }
+
+    return points / (form.length * 3);
+}
+
+// ===============================
+// Core Engine
+// ===============================
+
+export function parityDrawScore(
+    fixture: Extracted,
+    weights: EngineWeights = DEFAULT_WEIGHTS
 ) {
 
-    const teamMatches = fixtures.filter(f =>
-        isHome ? f.home === team : f.away === team
-    )
+    const contributions: Record<string, number> = {};
 
-    const total = teamMatches.length
+    const penaltyMissing = weights.penalties.missingData;
 
-    if (total === 0) {
-        return {
-            drawRate: 0,
-            under25Rate: 0,
-            avgGoals: 0,
-            confidence: 0
-        }
+    // ===============================
+    // PRIMARY FEATURES
+    // ===============================
+
+    let primarySum = 0;
+    let primaryWeight = 0;
+
+    const leagueDraw = safe(
+        fixture.league_context?.season_draw_rate,
+        0.25
+    );
+
+    contributions.leagueDrawRate =
+        leagueDraw * weights.primary.leagueDrawRate;
+
+    primarySum += contributions.leagueDrawRate;
+    primaryWeight += weights.primary.leagueDrawRate;
+
+    const homeDraw =
+        fixture.home_team_stats?.season?.drawRate ??
+        leagueDraw * penaltyMissing;
+
+    const awayDraw =
+        fixture.away_team_stats?.season?.drawRate ??
+        leagueDraw * penaltyMissing;
+
+    contributions.homeDrawRate =
+        homeDraw * weights.primary.homeDrawRate;
+
+    contributions.awayDrawRate =
+        awayDraw * weights.primary.awayDrawRate;
+
+    primarySum += contributions.homeDrawRate;
+    primarySum += contributions.awayDrawRate;
+
+    primaryWeight += weights.primary.homeDrawRate;
+    primaryWeight += weights.primary.awayDrawRate;
+
+    const homeFormDraw = drawRatio(
+        fixture.home_team_stats?.pregame?.form
+    );
+
+    const awayFormDraw = drawRatio(
+        fixture.away_team_stats?.pregame?.form
+    );
+
+    const homeFormScore =
+        homeFormDraw ?? penaltyMissing;
+
+    const awayFormScore =
+        awayFormDraw ?? penaltyMissing;
+
+    contributions.homeForm =
+        homeFormScore * weights.primary.homeForm;
+
+    contributions.awayForm =
+        awayFormScore * weights.primary.awayForm;
+
+    primarySum += contributions.homeForm;
+    primarySum += contributions.awayForm;
+
+    primaryWeight += weights.primary.homeForm;
+    primaryWeight += weights.primary.awayForm;
+
+    const primaryScore =
+        primaryWeight > 0 ? primarySum / primaryWeight : 0;
+
+    // ===============================
+    // SECONDARY FEATURES
+    // ===============================
+
+    let secondarySum = 0;
+    let secondaryWeight = 0;
+
+    const homeGD = safe(
+        fixture.home_team_stats?.season?.goalDifferencePerMatch
+    );
+
+    const awayGD = safe(
+        fixture.away_team_stats?.season?.goalDifferencePerMatch
+    );
+
+    const gdDiff = Math.abs(homeGD - awayGD);
+
+    const gdBalance = clamp(1 - gdDiff / 3);
+
+    contributions.goalDifferenceBalance =
+        gdBalance * weights.secondary.goalDifferenceBalance;
+
+    secondarySum += contributions.goalDifferenceBalance;
+    secondaryWeight += weights.secondary.goalDifferenceBalance;
+
+    const homeBig = safe(
+        fixture.home_team_stats?.season?.bigChances
+    );
+
+    const awayBig = safe(
+        fixture.away_team_stats?.season?.bigChances
+    );
+
+    const homeAgainst = safe(
+        fixture.home_team_stats?.season?.bigChancesAgainst
+    );
+
+    const awayAgainst = safe(
+        fixture.away_team_stats?.season?.bigChancesAgainst
+    );
+
+    const chanceDelta =
+        Math.abs(homeBig - awayBig) +
+        Math.abs(homeAgainst - awayAgainst);
+
+    const chanceTotal =
+        homeBig + awayBig + homeAgainst + awayAgainst + 1;
+
+    const chanceBalance =
+        clamp(1 - chanceDelta / chanceTotal);
+
+    contributions.bigChanceBalance =
+        chanceBalance * weights.secondary.bigChanceBalance;
+
+    secondarySum += contributions.bigChanceBalance;
+    secondaryWeight += weights.secondary.bigChanceBalance;
+
+    const secondaryScore =
+        secondaryWeight > 0 ? secondarySum / secondaryWeight : 0;
+
+    // ===============================
+    // TERTIARY FEATURES
+    // ===============================
+
+    let tertiarySum = 0;
+    let tertiaryWeight = 0;
+
+    let h2hScore = penaltyMissing;
+
+    if (
+        fixture.head_to_head?.draws !== undefined &&
+        fixture.head_to_head?.totalMeetings
+    ) {
+        h2hScore =
+            fixture.head_to_head.draws /
+            fixture.head_to_head.totalMeetings;
     }
 
-    let draws = 0
-    let under25 = 0
-    let totalGoals = 0
+    contributions.h2hDrawRate =
+        h2hScore * weights.tertiary.h2hDrawRate;
 
-    for (const f of teamMatches) {
+    tertiarySum += contributions.h2hDrawRate;
+    tertiaryWeight += weights.tertiary.h2hDrawRate;
 
-        const goals = f.homeGoals + f.awayGoals
+    let mgrScore = penaltyMissing;
 
-        totalGoals += goals
+    const mgr = fixture.managers?.h2h;
 
-        if (f.homeGoals === f.awayGoals) draws++
-        if (goals <= 2) under25++
+    if (
+        mgr &&
+        mgr.draws !== undefined &&
+        mgr.homeWins !== undefined &&
+        mgr.awayWins !== undefined
+    ) {
+        const total =
+            mgr.homeWins + mgr.awayWins + mgr.draws;
+
+        if (total > 0) mgrScore = mgr.draws / total;
     }
+
+    contributions.managerDrawRate =
+        mgrScore * weights.tertiary.managerDrawRate;
+
+    tertiarySum += contributions.managerDrawRate;
+    tertiaryWeight += weights.tertiary.managerDrawRate;
+
+    const tertiaryScore =
+        tertiaryWeight > 0 ? tertiarySum / tertiaryWeight : 0;
+
+    // ===============================
+    // PENALTIES
+    // ===============================
+
+    let penalty = 0;
+
+    const homeStrength =
+        formStrength(fixture.home_team_stats?.pregame?.form);
+
+    const awayStrength =
+        formStrength(fixture.away_team_stats?.pregame?.form);
+
+    if (
+        homeStrength !== null &&
+        awayStrength !== null
+    ) {
+        const diff = Math.abs(homeStrength - awayStrength);
+
+        penalty += diff * weights.penalties.formImbalance;
+    }
+
+    penalty += gdDiff * weights.penalties.strengthImbalance * 0.1;
+
+    penalty = clamp(penalty);
+
+    // ===============================
+    // INTERACTION BOOST
+    // ===============================
+
+    let boost = 0;
+
+    if (
+        primaryScore > 0.5 &&
+        secondaryScore > 0.5
+    ) {
+        boost += weights.interactionBoost;
+    }
+
+    // ===============================
+    // FINAL SCORE
+    // ===============================
+
+    let score =
+        primaryScore * weights.groupWeights.primary +
+        secondaryScore * weights.groupWeights.secondary +
+        tertiaryScore * weights.groupWeights.tertiary;
+
+    score = score - penalty + boost;
+
+    score = clamp(score);
 
     return {
-        drawRate: draws / total,
-        under25Rate: under25 / total,
-        avgGoals: totalGoals / total,
-        confidence: Math.min(total / 20, 1)
-    }
-}
-
-
-// ---------------- H2H METRICS ----------------
-export function computeH2H(
-    fixtures: HistoricalFixture[],
-    home: string,
-    away: string
-) {
-
-    const h2h = fixtures.filter(
-        f =>
-            (f.home === home && f.away === away) ||
-            (f.home === away && f.away === home)
-    )
-
-    const total = h2h.length
-
-    if (total === 0) {
-        return { drawRate: 0, avgGoalDiff: 999, confidence: 0 }
-    }
-
-    const draws = h2h.filter(f => f.homeGoals === f.awayGoals).length
-
-    const avgGoalDiff = h2h.reduce(
-        (s, f) => s + Math.abs(f.homeGoals - f.awayGoals),
-        0
-    ) / total
-
-    return {
-        drawRate: shrink(draws / total, total, 0.26, 3),
-        avgGoalDiff,
-        confidence: Math.min(total / 10, 1)
-    }
-}
-
-
-// ---------------- MARKET FACTOR ----------------
-export function computeMarketFactor(odds: Odds) {
-
-    const drawProb = impliedProbability(odds.draw)
-
-    const homeProb = impliedProbability(odds.homeWin)
-
-    const awayProb = impliedProbability(odds.awayWin)
-
-    const competitiveness = Math.min(homeProb, awayProb) / Math.max(homeProb, awayProb)
-
-    return {
-        drawProb,
-        competitiveness,
-        confidence: (drawProb > 0 || competitiveness > 0) ? 1 : 0,
-
-        txt: `odds H:${odds.homeWin} D:${odds.draw} A:${odds.awayWin}
-prob H:${homeProb.toFixed(4)} D:${drawProb.toFixed(4)} A:${awayProb.toFixed(4)}
-competitiveness:${competitiveness.toFixed(3)}`
-    }
-}
-
-
-// ---------------- FINAL DRAW SCORE ----------------
-export function computeDrawScore(params: {
-
-    leagueMetrics: ReturnType<typeof computeLeagueMetrics>
-
-    homeMetrics: ReturnType<typeof computeTeamMetrics>
-
-    awayMetrics: ReturnType<typeof computeTeamMetrics>
-
-    h2hMetrics: ReturnType<typeof computeH2H>
-
-    odds: Odds
-
-}) {
-
-    const { leagueMetrics, homeMetrics, awayMetrics, h2hMetrics, odds } = params
-
-    const lines: string[] = []
-
-
-    // MARKET
-    const market = computeMarketFactor(odds)
-
-    const marketScore = market.drawProb * 0.7 + market.competitiveness * 0.3
-
-    const marketWeighted = marketScore * 0.75
-
-
-    // TEAM
-    const hN = homeMetrics.confidence * 20
-
-    const aN = awayMetrics.confidence * 20
-
-    const hDraw = shrink(homeMetrics.drawRate, hN, 0.26, 15)
-
-    const aDraw = shrink(awayMetrics.drawRate, aN, 0.26, 15)
-
-    const hU25 = shrink(homeMetrics.under25Rate, hN, 0.45, 15)
-
-    const aU25 = shrink(awayMetrics.under25Rate, aN, 0.45, 15)
-
-    const hScore = hDraw * 0.7 + hU25 * 0.3
-
-    const aScore = aDraw * 0.7 + aU25 * 0.3
-
-    const hConf = Math.pow(Math.max(homeMetrics.confidence, 0.05), 2)
-
-    const aConf = Math.pow(Math.max(awayMetrics.confidence, 0.05), 2)
-
-    const teamBase = (hScore * hConf + aScore * aConf) / (hConf + aConf)
-
-    const teamWeighted = teamBase * 0.08
-
-
-    // LEAGUE
-    const leagueScore = (leagueMetrics.drawRate * 0.7 + leagueMetrics.under25Rate * 0.3) * leagueMetrics.confidence
-
-    const leagueWeighted = leagueScore * 0.12
-
-
-    // H2H
-    const h2hScore = h2hMetrics.confidence > 0 ? h2hMetrics.drawRate * h2hMetrics.confidence + 0.26 * (1 - h2hMetrics.confidence) : 0.26
-
-    const h2hWeighted = h2hScore * 0.05
-
-
-    // FINAL
-    const rawScore = marketWeighted + leagueWeighted + teamWeighted + h2hWeighted
-
-    const clampedScore = clamp(rawScore, 0, 1)
-
-
-    lines.push(`MARKET`, market.txt, `score:${marketScore.toFixed(4)} weight:${marketWeighted.toFixed(4)}`)
-
-    lines.push(`LEAGUE fixtures:${leagueMetrics.txt.split(':')[1]} draw:${leagueMetrics.drawRate.toFixed(3)} u25:${leagueMetrics.under25Rate.toFixed(3)} conf:${leagueMetrics.confidence.toFixed(2)} weight:${leagueWeighted.toFixed(4)}`)
-
-    lines.push(`HOME draw:${homeMetrics.drawRate.toFixed(3)} u25:${homeMetrics.under25Rate.toFixed(3)} conf:${homeMetrics.confidence.toFixed(2)}`)
-
-    lines.push(`AWAY draw:${awayMetrics.drawRate.toFixed(3)} u25:${awayMetrics.under25Rate.toFixed(3)} conf:${awayMetrics.confidence.toFixed(2)}`)
-
-    lines.push(`TEAM base:${teamBase.toFixed(3)} weight:${teamWeighted.toFixed(4)}`)
-
-    lines.push(`H2H draw:${h2hMetrics.drawRate.toFixed(3)} conf:${h2hMetrics.confidence.toFixed(2)} diff:${h2hMetrics.avgGoalDiff.toFixed(2)} weight:${h2hWeighted.toFixed(4)}`)
-
-    lines.push(`RAW:${rawScore.toFixed(4)} FINAL:${clampedScore.toFixed(4)}`)
-
-
-    lines.push(JSON.stringify({
-
-        leagueFixtures: leagueMetrics.txt.includes('fixtures') ? parseInt(leagueMetrics.txt.split(':')[1]) : 0,
-
-        homeSample: Math.round(homeMetrics.confidence * 20),
-
-        awaySample: Math.round(awayMetrics.confidence * 20),
-
-        h2hSample: Math.round(h2hMetrics.confidence * 10),
-
-        marketOverround: odds ? (odds.homeWin && odds.draw && odds.awayWin ? impliedRaw(odds.homeWin) + impliedRaw(odds.draw) + impliedRaw(odds.awayWin) - 1 : 0) : 0
-
-    }))
-
-
-    return {
-
-        drawScore: clampedScore,
-
-        deterministicVerbose: lines.join("\n")
-
-    }
-}
-
-
-// ---------------- TEAM ALL METRICS ----------------
-export function computeTeamMetricsAll(fixtures: HistoricalFixture[], team: string) {
-
-    const teamMatches = fixtures.filter(f => f.home === team || f.away === team)
-
-    const total = teamMatches.length
-
-    if (total === 0) return {
-
-        drawRate: 0, under25Rate: 0, avgGoals: 0,
-
-        goalClosenessRate: 0, avgGoalDiff: 0, confidence: 0
-
-    }
-
-    const decayFactor = 0.98
-
-    let weightSum = 0
-
-    let weightedDraws = 0
-
-    let weightedUnder25 = 0
-
-    let weightedGoals = 0
-
-    let weightedClose = 0
-
-    let weightedGoalDiff = 0
-
-
-    for (let i = 0; i < teamMatches.length; i++) {
-
-        const f = teamMatches[i]
-
-        const hg = safe(f.homeGoals)
-
-        const ag = safe(f.awayGoals)
-
-        const goals = hg + ag
-
-        const goalDiff = Math.abs(hg - ag)
-
-        const weight = Math.pow(decayFactor, teamMatches.length - 1 - i)
-
-        weightSum += weight
-
-        if (hg === ag) weightedDraws += weight
-
-        if (goals <= 2) weightedUnder25 += weight
-
-        if (goalDiff <= 1) weightedClose += weight
-
-        weightedGoals += goals * weight
-
-        weightedGoalDiff += goalDiff * weight
-    }
-
-    return {
-
-        drawRate: weightedDraws / weightSum,
-
-        under25Rate: weightedUnder25 / weightSum,
-
-        avgGoals: weightedGoals / weightSum,
-
-        goalClosenessRate: weightedClose / weightSum,
-
-        avgGoalDiff: weightedGoalDiff / weightSum,
-
-        confidence: Math.min(total / 20, 1)
-
-    }
+        score,
+        contributions,
+        penalty,
+        boost
+    };
 }

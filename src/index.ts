@@ -75,15 +75,7 @@ app.get("/data/download", async (req, res) => {
 app.get("/data/ftx", async (req, res) => {
     const limit = parseInt(req.query.limit as any) || 100;
     const minDrawIndex = parseFloat(req.query.minDrawIndex as any) || 0;
-    const strict = (((req.query.strict as any) || '') as string).toLowerCase() == "true";
-    res.send(await Booker.bookFTX({ limit, minDrawIndex, offset: 0, sortBy: 'drawIndex', strict }));
-});
-
-app.get("/data/book-oe", async (req, res) => {
-    const G = parseInt(req.query.g as string) || 5;
-    const T = parseInt(req.query.t as string) || 1;
-    const N = parseInt(req.query.n as string) || undefined;
-    res.send(await Booker.bookOE({ G, T, N }));
+    res.send(await Booker.bookFTX({ limit, minDrawIndex, offset: 0, sortBy: 'drawIndex' }));
 });
 
 app.get("/data/report/:hours", (req, res) => {
@@ -100,24 +92,6 @@ app.get("/data/report/:hours", (req, res) => {
         res.status(200).send(downloadable);
     } else {
         res.status(500).send("No data available yet.");
-    }
-});
-
-app.post("/data/import", (req, res) => {
-    try {
-        const data = req.body;
-        if (data) {
-            const p: HistoricalFixture[] = typeof data === "string" ? JSON.parse(data) : data;
-            const r = EventsProcessor.bulkImportFixtures(p);
-            res.send(`${r} historical fixture(s) imported`);
-        }
-        else {
-            res.sendStatus(400);
-        }
-
-    } catch (error) {
-        Log.dev(error);
-        res.status(500).send((error as any).message || 'An exception occurred.');
     }
 });
 

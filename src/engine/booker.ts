@@ -1,6 +1,7 @@
 import { axiosUndici } from './../lib/axios';
 import axios, { AxiosError } from "axios";
 import { EventsProcessor } from "./events_processor";
+import { LoadSelectionsResponse } from 'src/model/result';
 
 type Selection = {
   eventId: string;
@@ -40,7 +41,7 @@ interface ShareResponse {
   data?: ShareData;
 }
 
-const loadSelections = async (code: string): Promise<Selection[] | null> => {
+export const loadSelections = async (code: string, bodyOnly: boolean = false): Promise<any> => {
   try {
     const r = await axiosUndici.get<ShareResponse>(
       `https://www.sportybet.com/api/ng/orders/share/${code}`,
@@ -57,11 +58,17 @@ const loadSelections = async (code: string): Promise<Selection[] | null> => {
     const { isAvailable, message, data } = body;
 
     if (isAvailable && (message || "").toLowerCase() === "success" && data) {
-      const { ticket } = data;
+      const { ticket, outcomes } = data;
       const { selections } = ticket;
 
       if (Array.isArray(selections) && selections.length > 0) {
-        return selections;
+        if (bodyOnly) {
+          if (outcomes && Array.isArray(outcomes)) {
+            return body as unknown as LoadSelectionsResponse;
+          }
+          return null;
+        }
+        return selections as unknown as Selection[];
       }
     }
 
@@ -91,7 +98,7 @@ export const silentCodesJoiner = async (
       const part = parts[i];
 
       if (/^[A-Z0-9]{5,6}$/i.test(part)) {
-        const selections = await loadSelections(part);
+        const selections: Selection[] = await loadSelections(part);
 
         if (selections) {
           totalSelections = totalSelections.concat(selections);
@@ -379,15 +386,12 @@ export class Booker {
     limit?: number;
     offset?: number;
     minDrawIndex?: number;
-    strict?: boolean;
     // choose which sorter when strict=false
     sortBy?: "drawIndex" | "pD";
   }): Promise<string> => {
     const limit = opts?.limit ?? 20;
     const offset = opts?.offset ?? 0;
     const minDrawIndex = opts?.minDrawIndex ?? 0;
-    const strict = opts?.strict ?? false;
-    const sortBy = opts?.sortBy ?? "drawIndex";
 
     // NOTE:
     // You MUST set these to the real Sporty IDs for the exact FTX market you want.
@@ -426,95 +430,6 @@ export class Booker {
       return codes || "Could not book selections.";
     } catch (error) {
       return (error as any).message || "An unknown exception was encountered.";
-    }
-  };
-
-  static bookOE = async (opts: {
-    G: number;
-    T: number;
-    N?: number;
-  }): Promise<string> => {
-    const { G, T } = opts;
-    const N = opts.N || G; // Default N to G if not provided
-    const MARKET_ID_OE = "26";
-    const OUTCOME_ID_ODD = "70";
-    const OUTCOME_ID_EVEN = "72";
-
-    try {
-      const now = Date.now();
-      const tenMinutes = 10 * 60 * 1000;
-      const allUpcoming = EventsProcessor.getUpcomingFixtures().filter(
-        (f) => f.startTime > now + tenMinutes && !f.isTurnedOff
-      );
-      
-      if (allUpcoming.length < G) {
-        return `Not enough upcoming fixtures starting in >10 mins. Requested ${G}, found ${allUpcoming.length}.`;
-      }
-
-      // Pick G unique games at random (non-consecutive preferred)
-      let pool = [...allUpcoming].sort((a, b) => a.startTime - b.startTime);
-      let selectedGames: any[] = [];
-      
-      if (pool.length >= G * 2) {
-          const step = Math.floor(pool.length / G);
-          for(let i = 0; i < G; i++) {
-              selectedGames.push(pool[i * step]);
-          }
-      } else {
-          selectedGames = pool.sort(() => Math.random() - 0.5).slice(0, G);
-      }
-
-      // Generate T tickets
-      // Each ticket consists of N selections picked from the G selected games.
-      const tickets: Selection[][] = [];
-
-      for (let t = 0; t < T; t++) {
-        // Pick N games for this ticket from the pool of G
-        const ticketGames = [...selectedGames].sort(() => Math.random() - 0.5).slice(0, N);
-        const selections: Selection[] = [];
-
-        for (let i = 0; i < N; i++) {
-          const game = ticketGames[i];
-          // Determine outcome: spread O/E across tickets for each game
-          // We can use a simpler approach for N < G: just pick O/E randomly per selection
-          // but trying to keep a 50/50 global balance if possible.
-          const outcomeId = Math.random() > 0.5 ? OUTCOME_ID_ODD : OUTCOME_ID_EVEN;
-          
-          selections.push({
-            eventId: game.eventId,
-            marketId: MARKET_ID_OE,
-            outcomeId,
-            specifier: null
-          });
-        }
-        tickets.push(selections);
-      }
-
-      // Book those tickets sequentially or 3 at once at most (batching)
-      const shareCodes: string[] = [];
-      const batchSize = 3;
-      
-      for (let i = 0; i < tickets.length; i += batchSize) {
-          const batch = tickets.slice(i, i + batchSize);
-          const results = await Promise.all(batch.map(t => Booker.bookSporty(t)));
-          for(const code of results){
-            if(code){
-              const newCode = await silentCodesJoiner(code);
-              if(newCode){
-                shareCodes.push(newCode);
-              }
-            }
-          }
-          if (i + batchSize < tickets.length) {
-              await sleep(jitter(500, 200));
-          }
-      }
-
-      if (shareCodes.length === 0) return "Failed to book any O/E tickets.";
-      return shareCodes.join(" | ");
-
-    } catch (error) {
-      return (error as any).message || "An unknown exception occurred during O/E booking.";
     }
   };
 }
