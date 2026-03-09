@@ -109,8 +109,9 @@ app.get("/data/verdict/:eventId", (req, res) => {
     }
 });
 
-app.post("/data/toggle-turn-off", (req, res) => {
-    const { eventId, turnedOff } = req.body;
+app.get("/data/toggle-turn-off", (req, res) => {
+    const eventId = req.query.eventId as string;
+    const turnedOff = req.query.turnedOff === 'true';
     const success = EventsProcessor.toggleTurnOff(eventId, turnedOff);
     if (success) {
         res.sendStatus(200);

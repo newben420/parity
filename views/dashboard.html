@@ -332,15 +332,11 @@
 
         function toggleFix(el, eventId) {
             const turnedOff = !el.checked;
-            $.ajax({
-                url: "/data/toggle-turn-off",
-                method: "POST",
-                contentType: "application/json",
-                data: JSON.stringify({ eventId, turnedOff }),
-                error: function() {
-                    alert("Failed to update status");
-                    el.checked = !el.checked;
-                }
+            $.get("/data/toggle-turn-off", { eventId, turnedOff }, function() {
+                // success
+            }).fail(function() {
+                alert("Failed to update status");
+                el.checked = !el.checked;
             });
         }
 

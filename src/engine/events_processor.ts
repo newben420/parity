@@ -470,6 +470,7 @@ export class EventsProcessor {
                 EventsProcessor.db.exec("BEGIN");
                 for (const event of processedEvents) {
                     const s = EventsProcessor.saveFixture(event);
+                    saved++;
                     
                     const RE = await EventsProcessor.getResultEngine();
                     if (RE) {
