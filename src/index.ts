@@ -57,7 +57,7 @@ app.get("/data/past24", (req, res) => {
 });
 
 app.get("/data/download", async (req, res) => {
-    const downloadable = EventsProcessor.getAllFixtures();
+    const downloadable = EventsProcessor.getFullExportData();
 
     if (downloadable && downloadable.length) {
         const timestamp = Date.now();
