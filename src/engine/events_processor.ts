@@ -2,7 +2,7 @@ import { getTimeElapsed } from './../lib/date_time';
 import { Log } from './../lib/log';
 import { Site } from './../site';
 import path from "path";
-import { Event, Fixture, HistoricalFixture, Odds } from "./../model/sporty";
+import { Event, Fixture, FullFixture, HistoricalFixture, Odds } from "./../model/sporty";
 import { existsSync, mkdirSync } from 'fs';
 import { SportyHelpers } from './sporty_helpers';
 import { DatabaseSync } from 'node:sqlite';
@@ -276,6 +276,23 @@ export class EventsProcessor {
         const rows = EventsProcessor.db.prepare(`SELECT * FROM fixtures`).all();
         return rows.map(EventsProcessor.mapRowToFixture);
     };
+
+    static getFullExportData = (): FullFixture[] => {
+        const rows = EventsProcessor.db.prepare(`
+            SELECT f.*, v.extracted_data, v.verdict
+            FROM fixtures f
+            LEFT JOIN ai_verdicts v ON f.event_id = v.event_id
+        `).all() as any[];
+
+        return rows.map(row => {
+            const fixture = EventsProcessor.mapRowToFixture(row);
+            return {
+                ...fixture,
+                verdict: row.verdict || undefined,
+                extractedData: row.extracted_data ? JSON.parse(row.extracted_data) : undefined
+            };
+        });
+    }
 
     static getCompletedFixturesWithinHours = (
         hoursAgo: number,

@@ -297,3 +297,7 @@ export type HistoricalFixture = Fixture & {
     awayGoals: number
 }
 
+export type FullFixture = Fixture & {
+    verdict?: string;
+    extractedData?: any;
+}
